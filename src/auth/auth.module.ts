@@ -10,7 +10,7 @@ import { JwtAuthGuard } from './jwt-auth.guard.js';
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'insightpoll-super-secure-jwt-secret-key-2026',
+      secret: process.env.JWT_SECRET,
       signOptions: {
         expiresIn: '7d',
       },
@@ -18,6 +18,6 @@ import { JwtAuthGuard } from './jwt-auth.guard.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtAuthGuard],
-  exports: [AuthService, JwtAuthGuard],
+  exports: [AuthService, JwtAuthGuard, PassportModule],
 })
 export class AuthModule {}
