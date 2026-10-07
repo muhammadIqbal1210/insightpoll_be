@@ -6,11 +6,14 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getDashboardStats() {
-    // Total responden / surveyor / user di database
-    const totalRegisteredUsers = await this.prisma.user.count();
+    // Total responden / surveyor / user aktif di database
+    const totalRegisteredUsers = await this.prisma.user.count({
+      where: { deletedAt: null },
+    });
 
-    // Data user terbaru
+    // Data user terbaru yang aktif
     const recentUsers = await this.prisma.user.findMany({
+      where: { deletedAt: null },
       take: 4,
       orderBy: { createdAt: 'desc' },
       select: {
