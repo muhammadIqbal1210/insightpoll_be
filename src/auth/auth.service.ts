@@ -28,9 +28,9 @@ export class AuthService {
 
     const { email, password } = loginDto;
 
-    // Cari user di database
-    const user = await this.prisma.user.findUnique({
-      where: { email },
+    // Cari user di database yang belum dihapus (soft delete)
+    const user = await this.prisma.user.findFirst({
+      where: { email, deletedAt: null },
     });
 
     if (!user) {
