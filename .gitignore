@@ -27,3 +27,8 @@
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+/src/generated/prisma
+/.agents
+/.claude
+/.windsurf
