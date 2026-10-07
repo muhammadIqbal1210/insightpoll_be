@@ -23,6 +23,11 @@ async function bootstrap() {
     }),
   );
 
+  // Serve folder uploads sebagai static files
+  const express = await import('express');
+  const path = await import('path');
+  app.use('/uploads', express.default.static(path.join(process.cwd(), 'uploads')));
+
   const port = process.env.PORT || '4000';
   await app.listen(port);
   console.log(`Application is running on: http://localhost:${port}`);
