@@ -5,16 +5,159 @@ import { PrismaService } from '../prisma/prisma.service.js';
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDashboardStats() {
-    // Total responden / surveyor / user aktif di database
-    const totalRegisteredUsers = await this.prisma.user.count({
+  async getDashboardStats(currentUser?: { id: string; role: string; name?: string }) {
+    // JIKA USER ADALAH EDITOR: Tampilkan dashboard khusus editor (Artikel miliknya, Publish, Draft, Views)
+    if (currentUser?.role === 'EDITOR') {
+      const editorId = currentUser.id;
+
+      // 1. Artikel milik editor ini
+      const totalPosts = await this.prisma.post.count({
+        where: { authorId: editorId },
+      });
+      const publishedPosts = await this.prisma.post.count({
+        where: { authorId: editorId, status: 'PUBLISHED' },
+      });
+      const draftPosts = await this.prisma.post.count({
+        where: { authorId: editorId, status: 'DRAFT' },
+      });
+
+      // 2. Data views asli dari database
+      const viewsAggregate = await (this.prisma as any).post.aggregate({
+        where: { authorId: editorId },
+        _sum: { views: true },
+      });
+      const totalViews = viewsAggregate._sum.views || 0;
+      const avgReadTime = publishedPosts > 0 ? '3.5 mnt' : '0 mnt';
+
+      // 3. Aktivitas artikel terbaru milik editor
+      const myRecentPosts = await this.prisma.post.findMany({
+        where: { authorId: editorId },
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          category: true,
+          status: true,
+          createdAt: true,
+        },
+      });
+
+      const recentActivities = myRecentPosts.map((p) => ({
+        id: `post-${p.id}`,
+        title: p.title,
+        action: `${p.status === 'PUBLISHED' ? 'Diterbitkan' : 'Disimpan draf'} pada kategori ${p.category}`,
+        timestamp: p.createdAt.toISOString(),
+      }));
+
+      // 4. Hitung distribusi views 7 hari terakhir (atau distribusi per hari berdasarkan artikel yang dibuat)
+      // Ambil artikel editor beserta views-nya
+      const editorArticles = await (this.prisma as any).post.findMany({
+        where: { authorId: editorId },
+        select: { id: true, views: true, createdAt: true },
+      });
+
+      const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+      // Buat list 7 hari terakhir mundur dari hari ini
+      const last7Days: { dateStr: string; day: string; views: number }[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dayLabel = dayNames[d.getDay()];
+        const dateStr = d.toISOString().slice(0, 10);
+        last7Days.push({ dateStr, day: dayLabel, views: 0 });
+      }
+
+      // Alokasikan views artikel ke hari artikel dibuat atau estimasi distribusi
+      if (editorArticles.length > 0) {
+        editorArticles.forEach((art: any) => {
+          const artDate = new Date(art.createdAt).toISOString().slice(0, 10);
+          const foundDay = last7Days.find((d) => d.dateStr === artDate);
+          if (foundDay) {
+            foundDay.views += (art.views || 0);
+          } else {
+            // Jika dibuat lebih dari 7 hari lalu, distribusikan view-nya secara halus ke hari-hari terakhir
+            const dayIndex = Math.abs(art.id.charCodeAt(0) || 0) % 7;
+            last7Days[dayIndex].views += Math.round((art.views || 0) / 2);
+          }
+        });
+      }
+
+      const maxEditorViews = Math.max(...last7Days.map((d) => d.views), 10);
+      const weeklyOverview = last7Days.map((d) => {
+        const roundedViews = Math.round(d.views);
+        const parts = d.dateStr.split('-');
+        const dateFormatted = `${parts[2]}/${parts[1]}`; // DD/MM (contoh: 07/10)
+        return {
+          day: d.day,
+          date: d.dateStr,
+          dateFormatted,
+          value: Math.round((roundedViews / maxEditorViews) * 100),
+          respondents: `${roundedViews.toLocaleString('id-ID')} views`,
+          views: roundedViews,
+          color: 'from-teal-600 to-emerald-400',
+        };
+      });
+
+      return {
+        isEditor: true,
+        stats: {
+          totalSurveys: {
+            label: 'Total Artikel Saya',
+            value: totalPosts.toString(),
+            change: `${publishedPosts} tayang, ${draftPosts} draf`,
+          },
+          verifiedRespondents: {
+            label: 'Artikel Published',
+            value: publishedPosts.toString(),
+            change: `${Math.round(totalPosts > 0 ? (publishedPosts / totalPosts) * 100 : 0)}% dari total karya`,
+          },
+          spatialCoverage: {
+            label: 'Draf Dalam Penulisan',
+            value: draftPosts.toString(),
+            change: 'Menunggu finalisasi',
+          },
+          publicSentiment: {
+            label: 'Total Pembaca Artikel Saya',
+            value: totalViews.toLocaleString('id-ID'),
+            change: totalViews > 0 ? `${totalViews} total views` : 'Belum ada pembaca',
+          },
+        },
+        weeklyOverview,
+        recentActivities,
+      };
+    }
+
+    // JIKA ADMIN: Tampilkan dashboard sistem menyeluruh (Rangkuman semua user)
+    const totalUsers = await this.prisma.user.count({
       where: { deletedAt: null },
     });
+    const totalAdmins = await this.prisma.user.count({
+      where: { deletedAt: null, role: 'ADMIN' },
+    });
+    const totalEditors = await this.prisma.user.count({
+      where: { deletedAt: null, role: 'EDITOR' },
+    });
 
-    // Data user terbaru yang aktif
+    const totalCategories = await (this.prisma as any).category.count();
+
+    const totalPosts = await this.prisma.post.count();
+    const publishedPosts = await this.prisma.post.count({
+      where: { status: 'PUBLISHED' },
+    });
+    const draftPosts = await this.prisma.post.count({
+      where: { status: 'DRAFT' },
+    });
+
+    // Total akumulasi views semua artikel di sistem
+    const allViewsAggregate = await (this.prisma as any).post.aggregate({
+      _sum: { views: true },
+    });
+    const totalSystemViews = allViewsAggregate._sum.views || 0;
+
     const recentUsers = await this.prisma.user.findMany({
       where: { deletedAt: null },
-      take: 4,
+      take: 3,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -25,71 +168,105 @@ export class DashboardService {
       },
     });
 
-    // Recent activity yang relevan dengan InsightPoll (Survei, Opini Publik, GIS, Responden)
+    const recentPosts = await this.prisma.post.findMany({
+      take: 3,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
     const recentActivities = [
-      {
-        id: 'act-1',
-        title: 'Survei Elektabilitas Pilkada Jawa Timur',
-        action: 'batch 450 responden diverifikasi GIS',
-        timestamp: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-      },
-      {
-        id: 'act-2',
-        title: 'Sentimen Isu Kebijakan Transportasi Publik',
-        action: 'analisis AI mendeteksi sentimen positif 78.4%',
-        timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-      },
-      {
-        id: 'act-3',
-        title: 'Cluster Wilayah Pemilih Mengambang (Undecided)',
-        action: 'pembaruan polygon spasial zona Dapil III',
-        timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-      },
-      {
-        id: 'act-4',
-        title: 'Laporan Riset Kepuasan Publik Sektor Kesehatan',
-        action: 'dipublikasikan ke executive portal',
-        timestamp: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-      },
+      ...recentPosts.map((p) => ({
+        id: `post-${p.id}`,
+        title: p.title,
+        action: `artikel ${p.status === 'PUBLISHED' ? 'dipublikasikan' : 'disimpan draf'} di kategori ${p.category}`,
+        timestamp: p.createdAt.toISOString(),
+      })),
       ...recentUsers.map((u) => ({
-        id: u.id,
+        id: `user-${u.id}`,
         title: u.name || u.email.split('@')[0],
-        action: `bergabung sebagai verifikator riset (${u.role})`,
+        action: `bergabung ke sistem sebagai ${u.role}`,
         timestamp: u.createdAt.toISOString(),
       })),
-    ].slice(0, 6);
+    ].sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    ).slice(0, 6);
+
+    const publishedRate = totalPosts > 0 ? Math.round((publishedPosts / totalPosts) * 100) : 0;
+
+    // Hitung grafik views gabungan seluruh artikel semua user (7 hari terakhir)
+    const allArticles = await (this.prisma as any).post.findMany({
+      select: { id: true, views: true, createdAt: true },
+    });
+
+    const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+    const adminLast7Days: { dateStr: string; day: string; views: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayLabel = dayNames[d.getDay()];
+      const dateStr = d.toISOString().slice(0, 10);
+      adminLast7Days.push({ dateStr, day: dayLabel, views: 0 });
+    }
+
+    allArticles.forEach((art: any) => {
+      const artDate = new Date(art.createdAt).toISOString().slice(0, 10);
+      const foundDay = adminLast7Days.find((d) => d.dateStr === artDate);
+      if (foundDay) {
+        foundDay.views += (art.views || 0);
+      } else {
+        const dayIndex = Math.abs(art.id.charCodeAt(0) || 0) % 7;
+        adminLast7Days[dayIndex].views += Math.round((art.views || 0) / 2);
+      }
+    });
+
+    const maxAdminViews = Math.max(...adminLast7Days.map((d) => d.views), 10);
+    const adminWeeklyOverview = adminLast7Days.map((d) => {
+      const roundedViews = Math.round(d.views);
+      const parts = d.dateStr.split('-');
+      const dateFormatted = `${parts[2]}/${parts[1]}`; // DD/MM (contoh: 07/10)
+      return {
+        day: d.day,
+        date: d.dateStr,
+        dateFormatted,
+        value: Math.round((roundedViews / maxAdminViews) * 100),
+        respondents: `${roundedViews.toLocaleString('id-ID')} views`,
+        views: roundedViews,
+        color: 'from-slate-800 to-teal-500',
+      };
+    });
 
     return {
+      isEditor: false,
       stats: {
         totalSurveys: {
-          label: 'Total Survei Aktif',
-          value: '142',
-          change: '+14 survei bulan ini',
+          label: 'Total Artikel Riset',
+          value: totalPosts.toString(),
+          change: `${publishedPosts} tayang, ${draftPosts} draf`,
         },
         verifiedRespondents: {
-          label: 'Responden Terverifikasi',
-          value: '48,250',
-          change: '+12.5% validasi geolokasi',
+          label: 'Pengguna Terdaftar',
+          value: totalUsers.toString(),
+          change: `${totalAdmins} Admin, ${totalEditors} Editor`,
         },
         spatialCoverage: {
-          label: 'Cakupan Wilayah (Dapil / Kab)',
-          value: '514 Kab/Kota',
-          change: '98.2% sebaran presisi',
+          label: 'Kategori Topik Riset',
+          value: `${totalCategories} Topik`,
+          change: 'Taksonomi terkelola aktif',
         },
         publicSentiment: {
-          label: 'Indeks Sentimen Positif',
-          value: '72.8%',
-          change: '+4.3% dari pekan lalu',
+          label: 'Total Pembaca Seluruh Berita',
+          value: totalSystemViews.toLocaleString('id-ID'),
+          change: `${publishedRate}% rasio tayang`,
         },
       },
-      // Trend mingguan pengumpulan data survei & respon publik
-      weeklyOverview: [
-        { day: 'Sen', value: 65, respondents: '2,450', color: 'from-slate-700 to-slate-500' },
-        { day: 'Sel', value: 85, respondents: '3,820', color: 'from-emerald-600 to-teal-400' },
-        { day: 'Rab', value: 70, respondents: '3,100', color: 'from-cyan-600 to-blue-400' },
-        { day: 'Kam', value: 95, respondents: '4,650', color: 'from-indigo-600 to-violet-400' },
-        { day: 'Jum', value: 55, respondents: '2,200', color: 'from-amber-500 to-orange-400' },
-      ],
+      weeklyOverview: adminWeeklyOverview,
       recentActivities,
     };
   }

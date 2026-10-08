@@ -20,6 +20,10 @@ export class CreateUserDto {
 
 export class UpdateUserDto {
   @IsOptional()
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  email?: string;
+
+  @IsOptional()
   @IsString()
   name?: string;
 

@@ -9,7 +9,7 @@ export class DashboardController {
   @UseGuards(JwtAuthGuard)
   @Get('stats')
   async getStats(@Request() req: any) {
-    const data = await this.dashboardService.getDashboardStats();
+    const data = await this.dashboardService.getDashboardStats(req.user);
     return {
       message: 'Dashboard data retrieved successfully',
       data,

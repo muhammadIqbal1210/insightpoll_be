@@ -21,10 +21,78 @@ export class BlogService {
     return `${baseSlug}-${randomSuffix}`;
   }
 
-  async getAllPosts(params?: { category?: string; status?: string; search?: string }) {
+  private slugify(text: string): string {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  async getAllTags(params?: {
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = params?.page || 1;
+    const limit = params?.limit || 20;
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (params?.search) {
+      where.OR = [
+        { name: { contains: params.search, mode: 'insensitive' } },
+        { slug: { contains: params.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      (this.prisma as any).tag.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+        include: {
+          _count: {
+            select: { posts: true },
+          },
+        },
+      }),
+      (this.prisma as any).tag.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  async getAllPosts(params?: {
+    category?: string;
+    tag?: string;
+    status?: string;
+    search?: string;
+    authorId?: string;
+    page?: number;
+    limit?: number;
+  }) {
     const where: any = {};
     if (params?.category) where.category = params.category;
+    if (params?.tag) {
+      where.tags = {
+        some: {
+          OR: [{ slug: params.tag }, { name: params.tag }],
+        },
+      };
+    }
     if (params?.status) where.status = params.status;
+    if (params?.authorId) where.authorId = params.authorId;
     if (params?.search) {
       where.OR = [
         { title: { contains: params.search, mode: 'insensitive' } },
@@ -32,15 +100,58 @@ export class BlogService {
       ];
     }
 
-    return (this.prisma as any).post.findMany({
+    const isPaginated = params?.page !== undefined || params?.limit !== undefined;
+    const page = params?.page && params.page > 0 ? Number(params.page) : 1;
+    const limit = params?.limit && params.limit > 0 ? Number(params.limit) : 10;
+    const skip = (page - 1) * limit;
+
+    const include = {
+      author: {
+        select: { id: true, name: true, email: true, role: true },
+      },
+      tags: {
+        select: { id: true, name: true, slug: true },
+      },
+    };
+
+    if (isPaginated) {
+      const [total, items] = await Promise.all([
+        (this.prisma as any).post.count({ where }),
+        (this.prisma as any).post.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include,
+        }),
+      ]);
+
+      return {
+        items,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      };
+    }
+
+    const items = await (this.prisma as any).post.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: {
-        author: {
-          select: { id: true, name: true, email: true, role: true },
-        },
-      },
+      include,
     });
+
+    return {
+      items,
+      pagination: {
+        total: items.length,
+        page: 1,
+        limit: items.length || 10,
+        totalPages: 1,
+      },
+    };
   }
 
   async getPostById(id: string) {
@@ -49,6 +160,9 @@ export class BlogService {
       include: {
         author: {
           select: { id: true, name: true, email: true, role: true },
+        },
+        tags: {
+          select: { id: true, name: true, slug: true },
         },
       },
     });
@@ -73,6 +187,18 @@ export class BlogService {
       throw new ConflictException('Slug artikel sudah digunakan');
     }
 
+    // Persiapkan relasi tags (connectOrCreate)
+    const tagConnectOrCreate = (dto.tags || [])
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .map((tagName) => {
+        const tagSlug = this.slugify(tagName);
+        return {
+          where: { name: tagName },
+          create: { name: tagName, slug: tagSlug },
+        };
+      });
+
     return (this.prisma as any).post.create({
       data: {
         title: dto.title,
@@ -83,37 +209,91 @@ export class BlogService {
         coverImage: dto.coverImage || '',
         status: dto.status || 'PUBLISHED',
         authorId: userId,
+        ...(tagConnectOrCreate.length > 0
+          ? { tags: { connectOrCreate: tagConnectOrCreate } }
+          : {}),
       },
       include: {
         author: {
           select: { id: true, name: true, email: true },
         },
+        tags: {
+          select: { id: true, name: true, slug: true },
+        },
       },
     });
   }
 
-  async updatePost(id: string, dto: UpdatePostDto) {
-    await this.getPostById(id);
+  async updatePost(id: string, dto: UpdatePostDto, user?: { id: string; role: string }) {
+    const existingPost = await this.getPostById(id);
+
+    // Jika editor, hanya boleh mengedit artikel miliknya sendiri
+    if (user && user.role === 'EDITOR' && existingPost.authorId !== user.id) {
+      throw new ConflictException('Anda hanya dapat mengubah artikel yang Anda buat sendiri');
+    }
+
+    const { tags, ...postData } = dto;
+    const updatePayload: any = { ...postData };
+
+    if (tags !== undefined) {
+      const tagConnectOrCreate = (tags || [])
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+        .map((tagName) => {
+          const tagSlug = this.slugify(tagName);
+          return {
+            where: { name: tagName },
+            create: { name: tagName, slug: tagSlug },
+          };
+        });
+
+      updatePayload.tags = {
+        set: [], // reset relasi tag lama
+        connectOrCreate: tagConnectOrCreate,
+      };
+    }
 
     return (this.prisma as any).post.update({
       where: { id },
-      data: {
-        ...dto,
-      },
+      data: updatePayload,
       include: {
         author: {
           select: { id: true, name: true, email: true },
+        },
+        tags: {
+          select: { id: true, name: true, slug: true },
         },
       },
     });
   }
 
-  async deletePost(id: string) {
-    await this.getPostById(id);
+  async deletePost(id: string, user?: { id: string; role: string }) {
+    const existingPost = await this.getPostById(id);
+
+    // Jika editor, hanya boleh menghapus artikel miliknya sendiri
+    if (user && user.role === 'EDITOR' && existingPost.authorId !== user.id) {
+      throw new ConflictException('Anda hanya dapat menghapus artikel yang Anda buat sendiri');
+    }
+
     await (this.prisma as any).post.delete({
       where: { id },
     });
 
     return { message: 'Berita/artikel berhasil dihapus' };
+  }
+
+  async incrementViews(id: string) {
+    return (this.prisma as any).post.update({
+      where: { id },
+      data: {
+        views: {
+          increment: 1,
+        },
+      },
+      select: {
+        id: true,
+        views: true,
+      },
+    });
   }
 }

@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Request,
   ForbiddenException,
@@ -13,24 +14,61 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { UsersService } from './users.service.js';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto.js';
+import { UpdateProfileDto } from './dto/profile.dto.js';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   /**
+   * Mengambil data profil user yang sedang login (Admin atau Editor)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('profile')
+  async getProfile(@Request() req: any) {
+    const data = await this.usersService.getProfile(req.user.id);
+    return {
+      message: 'Berhasil mengambil profil pengguna',
+      data,
+    };
+  }
+
+  /**
+   * Memperbarui profil dan/atau ganti password user sendiri
+   */
+  @UseGuards(JwtAuthGuard)
+  @Put('profile')
+  async updateProfile(@Request() req: any, @Body() dto: UpdateProfileDto) {
+    const data = await this.usersService.updateProfile(req.user.id, dto);
+    return {
+      message: 'Profil berhasil diperbarui',
+      data,
+    };
+  }
+
+  /**
    * Mengambil semua daftar user (Hanya ADMIN yang diizinkan)
    */
   @UseGuards(JwtAuthGuard)
   @Get()
-  async getAllUsers(@Request() req: any) {
+  async getAllUsers(
+    @Request() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
     if (req.user.role !== 'ADMIN') {
       throw new ForbiddenException('Hanya Admin yang dapat mengakses manajemen user');
     }
-    const data = await this.usersService.getAllUsers();
+    const result = await this.usersService.getAllUsers({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      search,
+    });
     return {
       message: 'Berhasil mengambil daftar pengguna',
-      data,
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 

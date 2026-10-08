@@ -25,17 +25,40 @@ model User {
 }
 
 model Post {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
-  slug        String   @unique
+  slug        String    @unique
   summary     String?
   content     String
-  category    String   @default("Berita")
+  category    String    @default("Berita")
+  categoryId  String?
+  categoryRel Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   coverImage  String?
-  status      String   @default("PUBLISHED") // PUBLISHED / DRAFT
+  status      String    @default("PUBLISHED") // PUBLISHED / DRAFT
+  views       Int       @default(0)
   authorId    String
-  author      User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  tags        Tag[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  posts       Post[]
+}
+
+model Tag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  posts     Post[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 

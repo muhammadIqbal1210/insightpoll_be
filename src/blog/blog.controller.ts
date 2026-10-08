@@ -72,18 +72,53 @@ export class BlogController {
   }
 
   /**
+   * Mengambil semua daftar tag yang ada di sistem
+   */
+  @Get('tags')
+  async getAllTags(
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.blogService.getAllTags({
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    return {
+      message: 'Berhasil mengambil daftar tag',
+      data: result.items,
+      pagination: result.pagination,
+    };
+  }
+
+  /**
    * Mengambil semua daftar berita/blog (publik / dapat diakses siapapun)
+   * Jika ada query authorId, filter berdasarkan authorId
    */
   @Get()
   async getAllPosts(
     @Query('category') category?: string,
+    @Query('tag') tag?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('authorId') authorId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    const data = await this.blogService.getAllPosts({ category, status, search });
+    const result = await this.blogService.getAllPosts({
+      category,
+      tag,
+      status,
+      search,
+      authorId,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
     return {
       message: 'Berhasil mengambil daftar artikel',
-      data,
+      data: result.items,
+      pagination: result.pagination,
     };
   }
 
@@ -118,8 +153,8 @@ export class BlogController {
    */
   @UseGuards(JwtAuthGuard)
   @Put(':id')
-  async updatePost(@Param('id') id: string, @Body() dto: UpdatePostDto) {
-    const data = await this.blogService.updatePost(id, dto);
+  async updatePost(@Request() req: any, @Param('id') id: string, @Body() dto: UpdatePostDto) {
+    const data = await this.blogService.updatePost(id, dto, req.user);
     return {
       message: 'Berita/artikel berhasil diperbarui',
       data,
@@ -131,7 +166,19 @@ export class BlogController {
    */
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  async deletePost(@Param('id') id: string) {
-    return this.blogService.deletePost(id);
+  async deletePost(@Request() req: any, @Param('id') id: string) {
+    return this.blogService.deletePost(id, req.user);
+  }
+
+  /**
+   * Mencatat view pembaca artikel (publik, tanpa perlu login)
+   */
+  @Post(':id/view')
+  async recordView(@Param('id') id: string) {
+    const data = await this.blogService.incrementViews(id);
+    return {
+      message: 'View berhasil dicatat',
+      data,
+    };
   }
 }

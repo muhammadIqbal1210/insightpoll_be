@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsArray } from 'class-validator';
 
 export class CreatePostDto {
   @IsNotEmpty({ message: 'Judul berita/blog tidak boleh kosong' })
@@ -28,6 +28,10 @@ export class CreatePostDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsArray()
+  tags?: string[];
 }
 
 export class UpdatePostDto {
@@ -58,4 +62,8 @@ export class UpdatePostDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsArray()
+  tags?: string[];
 }
