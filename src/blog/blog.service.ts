@@ -83,21 +83,40 @@ export class BlogService {
     limit?: number;
   }) {
     const where: any = {};
-    if (params?.category) where.category = params.category;
-    if (params?.tag) {
-      where.tags = {
-        some: {
-          OR: [{ slug: params.tag }, { name: params.tag }],
-        },
-      };
+    const andConditions: any[] = [];
+
+    if (params?.category) {
+      andConditions.push({
+        OR: [
+          { category: params.category },
+          { categoryId: params.category },
+          { categoryRel: { is: { slug: params.category } } },
+          { categoryRel: { is: { name: params.category } } },
+        ],
+      });
     }
-    if (params?.status) where.status = params.status;
-    if (params?.authorId) where.authorId = params.authorId;
+    if (params?.tag) {
+      andConditions.push({
+        tags: {
+          some: {
+            OR: [{ slug: params.tag }, { name: params.tag }],
+          },
+        },
+      });
+    }
+    if (params?.status) andConditions.push({ status: params.status });
+    if (params?.authorId) andConditions.push({ authorId: params.authorId });
     if (params?.search) {
-      where.OR = [
-        { title: { contains: params.search, mode: 'insensitive' } },
-        { summary: { contains: params.search, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { title: { contains: params.search, mode: 'insensitive' } },
+          { summary: { contains: params.search, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     const isPaginated = params?.page !== undefined || params?.limit !== undefined;
@@ -110,6 +129,9 @@ export class BlogService {
         select: { id: true, name: true, email: true, role: true },
       },
       tags: {
+        select: { id: true, name: true, slug: true },
+      },
+      categoryRel: {
         select: { id: true, name: true, slug: true },
       },
     };
@@ -164,6 +186,9 @@ export class BlogService {
         tags: {
           select: { id: true, name: true, slug: true },
         },
+        categoryRel: {
+          select: { id: true, name: true, slug: true },
+        },
       },
     });
 
@@ -187,6 +212,32 @@ export class BlogService {
       throw new ConflictException('Slug artikel sudah digunakan');
     }
 
+    // Cari atau hubungkan kategori ke tabel Category
+    let categoryName = dto.category?.trim() || 'Berita';
+    let resolvedCategoryId: string | null = dto.categoryId || null;
+
+    if (resolvedCategoryId) {
+      const catById = await (this.prisma as any).category.findUnique({
+        where: { id: resolvedCategoryId },
+      });
+      if (catById) {
+        categoryName = catById.name;
+      }
+    } else if (categoryName) {
+      const catByName = await (this.prisma as any).category.findFirst({
+        where: {
+          OR: [
+            { name: categoryName },
+            { slug: this.slugify(categoryName) },
+          ],
+        },
+      });
+      if (catByName) {
+        resolvedCategoryId = catByName.id;
+        categoryName = catByName.name;
+      }
+    }
+
     // Persiapkan relasi tags (connectOrCreate)
     const tagConnectOrCreate = (dto.tags || [])
       .map((t) => t.trim())
@@ -205,7 +256,8 @@ export class BlogService {
         slug,
         summary: dto.summary || '',
         content: dto.content,
-        category: dto.category || 'Berita',
+        category: categoryName,
+        categoryId: resolvedCategoryId,
         coverImage: dto.coverImage || '',
         status: dto.status || 'PUBLISHED',
         authorId: userId,
@@ -220,6 +272,9 @@ export class BlogService {
         tags: {
           select: { id: true, name: true, slug: true },
         },
+        categoryRel: {
+          select: { id: true, name: true, slug: true },
+        },
       },
     });
   }
@@ -232,8 +287,39 @@ export class BlogService {
       throw new ConflictException('Anda hanya dapat mengubah artikel yang Anda buat sendiri');
     }
 
-    const { tags, ...postData } = dto;
+    const { tags, category, categoryId, ...postData } = dto;
     const updatePayload: any = { ...postData };
+
+    // Update kategori & relasi categoryId bila disediakan
+    if (categoryId !== undefined || category !== undefined) {
+      let categoryName = category?.trim() || existingPost.category || 'Berita';
+      let resolvedCategoryId: string | null = categoryId || null;
+
+      if (resolvedCategoryId) {
+        const catById = await (this.prisma as any).category.findUnique({
+          where: { id: resolvedCategoryId },
+        });
+        if (catById) {
+          categoryName = catById.name;
+        }
+      } else if (categoryName) {
+        const catByName = await (this.prisma as any).category.findFirst({
+          where: {
+            OR: [
+              { name: categoryName },
+              { slug: this.slugify(categoryName) },
+            ],
+          },
+        });
+        if (catByName) {
+          resolvedCategoryId = catByName.id;
+          categoryName = catByName.name;
+        }
+      }
+
+      updatePayload.category = categoryName;
+      updatePayload.categoryId = resolvedCategoryId;
+    }
 
     if (tags !== undefined) {
       const tagConnectOrCreate = (tags || [])
@@ -263,6 +349,9 @@ export class BlogService {
         tags: {
           select: { id: true, name: true, slug: true },
         },
+        categoryRel: {
+          select: { id: true, name: true, slug: true },
+        },
       },
     });
   }
@@ -283,17 +372,41 @@ export class BlogService {
   }
 
   async incrementViews(id: string) {
-    return (this.prisma as any).post.update({
-      where: { id },
-      data: {
-        views: {
-          increment: 1,
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const [post] = await Promise.all([
+      (this.prisma as any).post.update({
+        where: { id },
+        data: {
+          views: {
+            increment: 1,
+          },
         },
-      },
-      select: {
-        id: true,
-        views: true,
-      },
-    });
+        select: {
+          id: true,
+          views: true,
+        },
+      }),
+      (this.prisma as any).postDailyView.upsert({
+        where: {
+          postId_date: {
+            postId: id,
+            date: today,
+          },
+        },
+        create: {
+          postId: id,
+          date: today,
+          views: 1,
+        },
+        update: {
+          views: {
+            increment: 1,
+          },
+        },
+      }),
+    ]);
+
+    return post;
   }
 }

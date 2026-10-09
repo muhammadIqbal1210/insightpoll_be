@@ -23,6 +23,10 @@ export class CreatePostDto {
 
   @IsOptional()
   @IsString()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsString()
   coverImage?: string;
 
   @IsOptional()
@@ -54,6 +58,10 @@ export class UpdatePostDto {
   @IsOptional()
   @IsString()
   category?: string;
+
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
 
   @IsOptional()
   @IsString()

@@ -50,15 +50,8 @@ export class DashboardService {
         timestamp: p.createdAt.toISOString(),
       }));
 
-      // 4. Hitung distribusi views 7 hari terakhir (atau distribusi per hari berdasarkan artikel yang dibuat)
-      // Ambil artikel editor beserta views-nya
-      const editorArticles = await (this.prisma as any).post.findMany({
-        where: { authorId: editorId },
-        select: { id: true, views: true, createdAt: true },
-      });
-
+      // 4. Hitung distribusi views 7 hari terakhir menggunakan tabel agregasi PostDailyView
       const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-      // Buat list 7 hari terakhir mundur dari hari ini
       const last7Days: { dateStr: string; day: string; views: number }[] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date();
@@ -68,20 +61,25 @@ export class DashboardService {
         last7Days.push({ dateStr, day: dayLabel, views: 0 });
       }
 
-      // Alokasikan views artikel ke hari artikel dibuat atau estimasi distribusi
-      if (editorArticles.length > 0) {
-        editorArticles.forEach((art: any) => {
-          const artDate = new Date(art.createdAt).toISOString().slice(0, 10);
-          const foundDay = last7Days.find((d) => d.dateStr === artDate);
-          if (foundDay) {
-            foundDay.views += (art.views || 0);
-          } else {
-            // Jika dibuat lebih dari 7 hari lalu, distribusikan view-nya secara halus ke hari-hari terakhir
-            const dayIndex = Math.abs(art.id.charCodeAt(0) || 0) % 7;
-            last7Days[dayIndex].views += Math.round((art.views || 0) / 2);
-          }
-        });
-      }
+      // Ambil data view harian dari PostDailyView untuk artikel milik editor
+      const editorDailyStats = await (this.prisma as any).postDailyView.findMany({
+        where: {
+          date: { in: last7Days.map((d) => d.dateStr) },
+          post: { authorId: editorId },
+        },
+        select: {
+          date: true,
+          views: true,
+        },
+      });
+
+      // Petakan views harian ke masing-masing hari
+      editorDailyStats.forEach((stat: { date: string; views: number }) => {
+        const targetDay = last7Days.find((d) => d.dateStr === stat.date);
+        if (targetDay) {
+          targetDay.views += stat.views;
+        }
+      });
 
       const maxEditorViews = Math.max(...last7Days.map((d) => d.views), 10);
       const weeklyOverview = last7Days.map((d) => {
@@ -200,11 +198,7 @@ export class DashboardService {
 
     const publishedRate = totalPosts > 0 ? Math.round((publishedPosts / totalPosts) * 100) : 0;
 
-    // Hitung grafik views gabungan seluruh artikel semua user (7 hari terakhir)
-    const allArticles = await (this.prisma as any).post.findMany({
-      select: { id: true, views: true, createdAt: true },
-    });
-
+    // Hitung grafik views gabungan seluruh artikel semua user (7 hari terakhir) via PostDailyView
     const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
     const adminLast7Days: { dateStr: string; day: string; views: number }[] = [];
     for (let i = 6; i >= 0; i--) {
@@ -215,14 +209,21 @@ export class DashboardService {
       adminLast7Days.push({ dateStr, day: dayLabel, views: 0 });
     }
 
-    allArticles.forEach((art: any) => {
-      const artDate = new Date(art.createdAt).toISOString().slice(0, 10);
-      const foundDay = adminLast7Days.find((d) => d.dateStr === artDate);
-      if (foundDay) {
-        foundDay.views += (art.views || 0);
-      } else {
-        const dayIndex = Math.abs(art.id.charCodeAt(0) || 0) % 7;
-        adminLast7Days[dayIndex].views += Math.round((art.views || 0) / 2);
+    // Ambil data view harian gabungan seluruh artikel
+    const allDailyStats = await (this.prisma as any).postDailyView.findMany({
+      where: {
+        date: { in: adminLast7Days.map((d) => d.dateStr) },
+      },
+      select: {
+        date: true,
+        views: true,
+      },
+    });
+
+    allDailyStats.forEach((stat: { date: string; views: number }) => {
+      const targetDay = adminLast7Days.find((d) => d.dateStr === stat.date);
+      if (targetDay) {
+        targetDay.views += stat.views;
       }
     });
 
