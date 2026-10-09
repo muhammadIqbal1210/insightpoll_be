@@ -16,13 +16,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       OBSERVE_APP_KEY: ${OBSERVE_APP_KEY:-}
       OBSERVE_APP_SECRET: ${OBSERVE_APP_SECRET:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
-      - backend_uploads:/app/uploads
+      - ./uploads:/app/uploads
     ports:
-      - "${HOST_PORT:-4001}:4000"
-
-volumes:
-  backend_uploads:
-    driver: local
+      - "${HOST_PORT}:4000"
