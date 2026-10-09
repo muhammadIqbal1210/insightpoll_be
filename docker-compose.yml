@@ -19,4 +19,4 @@ services:
     volumes:
       - ./uploads:/app/uploads
     ports:
-      - "${HOST_PORT}:4000"
+      - "${PORT}:4000"
