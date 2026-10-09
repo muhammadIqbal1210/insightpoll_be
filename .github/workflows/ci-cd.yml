@@ -2,9 +2,9 @@ name: Backend CI/CD Pipeline
 
 on:
   push:
-    branches: [main, master]
+    branches: production
   pull_request:
-    branches: [main, master]
+    branches: production
   workflow_dispatch:
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
   deploy:
     needs: test-and-lint
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
 
     steps:
       - name: Deploy to VPS via SSH
