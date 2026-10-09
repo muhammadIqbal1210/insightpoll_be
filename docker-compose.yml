@@ -21,3 +21,10 @@ services:
       - ./uploads:/app/uploads
     ports:
       - "${PORT}:4000"
+    networks:
+      - default
+      - global-network
+
+networks:
+  global-network:
+    external: true
