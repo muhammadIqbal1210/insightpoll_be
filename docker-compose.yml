@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: insightpoll_backend
+    image: insightpoll_backend
     restart: always
     environment:
       PORT: 4000
