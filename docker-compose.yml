@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: insightpoll_backend
+    image: insightpoll_backend
     restart: always
     environment:
       PORT: 4000
@@ -19,4 +20,11 @@ services:
     volumes:
       - ./uploads:/app/uploads
     ports:
-      - "${HOST_PORT}:4000"
+      - "${PORT}:4000"
+    networks:
+      - default
+      - global-network
+
+networks:
+  global-network:
+    external: true
